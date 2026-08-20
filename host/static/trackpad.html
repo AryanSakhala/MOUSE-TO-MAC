@@ -41,9 +41,7 @@
       display: flex; align-items: center; justify-content: space-between;
       padding: 2px 4px;
     }
-    .brand {
-      font-size: 15px; font-weight: 650; letter-spacing: -0.02em;
-    }
+    .brand { font-size: 15px; font-weight: 650; letter-spacing: -0.02em; }
     .brand span { color: var(--muted); font-weight: 500; }
     #status {
       display: inline-flex; align-items: center; gap: 7px;
@@ -60,7 +58,6 @@
     #status.bad { color: var(--danger); border-color: rgba(248,113,113,0.25); }
     #status.bad i { background: var(--danger); }
 
-    /* Mouse-style buttons on top */
     .mouse-top {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -93,8 +90,6 @@
       background: var(--press);
       box-shadow: inset 0 2px 8px rgba(0,0,0,0.45);
     }
-    .mbtn.left { border-top-left-radius: 26px; }
-    .mbtn.right { border-top-right-radius: 26px; }
 
     #pad {
       position: relative;
@@ -107,6 +102,10 @@
       overflow: hidden;
       display: grid;
       place-items: center;
+    }
+    #pad.dragging {
+      border-color: rgba(110,231,183,0.45);
+      box-shadow: inset 0 0 0 1px rgba(110,231,183,0.12);
     }
     #pad::before {
       content: "";
@@ -132,9 +131,7 @@
       background: radial-gradient(circle, rgba(110,231,183,0.35), transparent 70%);
       transform: scale(0.4);
     }
-    #ripple.on {
-      animation: rip 380ms ease-out;
-    }
+    #ripple.on { animation: rip 380ms ease-out; }
     @keyframes rip {
       from { opacity: 0.9; transform: scale(0.35); }
       to { opacity: 0; transform: scale(1.8); }
@@ -179,11 +176,11 @@
     <div class="mouse-top" aria-label="Mouse buttons">
       <button type="button" class="mbtn left" id="left" aria-label="Left click">
         <span>Left</span>
-        <small>Click</small>
+        <small>Hold to drag</small>
       </button>
       <button type="button" class="mbtn right" id="right" aria-label="Right click">
         <span>Right</span>
-        <small>Click</small>
+        <small>Hold / menu</small>
       </button>
     </div>
 
@@ -191,7 +188,7 @@
       <div id="ripple"></div>
       <div class="pad-copy">
         <strong>Trackpad</strong>
-        <p>Drag to move · tap · double-tap · long-press for right-click</p>
+        <p>Glide to move · tap to click · double-tap+hold+drag to select</p>
       </div>
     </div>
 
@@ -204,12 +201,12 @@
       </div>
       <div></div>
       <div></div>
-      <p class="tips">2-finger scroll · 3-finger swipe for Spaces / Mission Control</p>
+      <p class="tips">1-finger glide = move only · double-tap then hold &amp; drag = select · 2-finger = scroll</p>
     </div>
   </div>
 
   <script>
-    const OP_MOVE = 1, OP_SCROLL = 2, OP_CLICK = 3, OP_SPACE = 4;
+    const OP_MOVE = 1, OP_SCROLL = 2, OP_CLICK = 3, OP_SPACE = 4, OP_DOWN = 5, OP_UP = 6;
     const BTN_LEFT = 0, BTN_RIGHT = 1, BTN_DOUBLE = 2;
     const SPACE_LEFT = 0, SPACE_RIGHT = 1, SPACE_UP = 2, SPACE_DOWN = 3;
 
@@ -225,7 +222,7 @@
     const ACCEL = 0.055;
     const SPACE_THRESHOLD = 80;
     const MOVE_SLOP = 8;
-    const DOUBLE_MS = 300;
+    const DOUBLE_MS = 420;
     const LONG_MS = 450;
     const SEND_MIN_MS = 3;
 
@@ -239,9 +236,13 @@
     let longFired = false;
     let lastTapAt = 0;
     let pendingSingle = 0;
+    let selectArmed = false;
     let accDx = 0, accDy = 0, accScroll = 0;
     let raf = 0;
     let lastSend = 0;
+    let uiLeft = false;
+    let uiRight = false;
+    let padDragging = false;
     const moveBuf = new ArrayBuffer(9);
     const moveView = new DataView(moveBuf);
     const scrollBuf = new ArrayBuffer(5);
@@ -272,6 +273,13 @@
       const buf = new ArrayBuffer(2);
       const v = new DataView(buf);
       v.setUint8(0, OP_CLICK);
+      v.setUint8(1, btn);
+      return buf;
+    }
+    function packButton(op, btn) {
+      const buf = new ArrayBuffer(2);
+      const v = new DataView(buf);
+      v.setUint8(0, op);
       v.setUint8(1, btn);
       return buf;
     }
@@ -325,14 +333,33 @@
       scheduleFlush();
     }
     function sendClick(btn) {
-      if (raf) { cancelAnimationFrame(raf); flush(); }
-      else flush();
+      if (raf) { cancelAnimationFrame(raf); flush(); } else flush();
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(packClick(btn));
     }
+    function sendDown(btn) {
+      if (raf) { cancelAnimationFrame(raf); flush(); } else flush();
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(packButton(OP_DOWN, btn));
+    }
+    function sendUp(btn) {
+      if (raf) { cancelAnimationFrame(raf); flush(); } else flush();
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(packButton(OP_UP, btn));
+    }
     function sendSpace(dir) {
-      if (raf) { cancelAnimationFrame(raf); flush(); }
-      else flush();
+      if (raf) { cancelAnimationFrame(raf); flush(); } else flush();
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(packSpace(dir));
+    }
+
+    function beginPadDrag() {
+      if (padDragging || uiLeft || uiRight) return;
+      padDragging = true;
+      sendDown(BTN_LEFT);
+      pad.classList.add("dragging");
+    }
+    function endPadDrag() {
+      if (!padDragging) return;
+      padDragging = false;
+      sendUp(BTN_LEFT);
+      pad.classList.remove("dragging");
     }
 
     function clearLong() {
@@ -358,30 +385,53 @@
     }
 
     function wasTap() {
-      return travel < MOVE_SLOP && !scrolling && !spaceMode && !longFired;
+      return travel < MOVE_SLOP && !scrolling && !spaceMode && !longFired && !padDragging;
     }
 
-    function bindPress(btn, which) {
-      const down = (e) => {
+    function bindHold(btn, which) {
+      const press = (e) => {
         e.preventDefault();
+        e.stopPropagation();
         btn.classList.add("down");
         clearPendingSingle();
         lastTapAt = 0;
-        sendClick(which);
+        endPadDrag();
+        if (which === BTN_LEFT) {
+          if (uiLeft) return;
+          uiLeft = true;
+          sendDown(BTN_LEFT);
+        } else {
+          if (uiRight) return;
+          uiRight = true;
+          sendDown(BTN_RIGHT);
+        }
       };
-      const up = () => btn.classList.remove("down");
-      btn.addEventListener("touchstart", down, { passive: false });
-      btn.addEventListener("touchend", up);
-      btn.addEventListener("touchcancel", up);
-      btn.addEventListener("mousedown", (e) => { e.preventDefault(); down(e); });
-      btn.addEventListener("mouseup", up);
-      btn.addEventListener("mouseleave", up);
+      const release = (e) => {
+        if (e) e.preventDefault();
+        btn.classList.remove("down");
+        if (which === BTN_LEFT) {
+          if (!uiLeft) return;
+          uiLeft = false;
+          sendUp(BTN_LEFT);
+        } else {
+          if (!uiRight) return;
+          uiRight = false;
+          sendUp(BTN_RIGHT);
+        }
+      };
+      btn.addEventListener("touchstart", press, { passive: false });
+      btn.addEventListener("touchend", release, { passive: false });
+      btn.addEventListener("touchcancel", release, { passive: false });
+      btn.addEventListener("mousedown", press);
+      btn.addEventListener("mouseup", release);
+      btn.addEventListener("mouseleave", release);
     }
-    bindPress(leftBtn, BTN_LEFT);
-    bindPress(rightBtn, BTN_RIGHT);
+    bindHold(leftBtn, BTN_LEFT);
+    bindHold(rightBtn, BTN_RIGHT);
 
     pad.addEventListener("touchstart", (e) => {
       e.preventDefault();
+      const now = performance.now();
       travel = 0;
       longFired = false;
       scrolling = e.touches.length === 2;
@@ -389,10 +439,15 @@
       spaceDx = spaceDy = 0;
       last = midTouches(e.touches);
       clearLong();
+
+      // Second tap soon after first → arm select (do not click yet)
+      selectArmed = !!(e.touches.length === 1 && lastTapAt && (now - lastTapAt) < DOUBLE_MS);
+      if (selectArmed) clearPendingSingle();
+
       if (e.touches.length === 1) {
         flashRipple(e.touches[0].clientX, e.touches[0].clientY);
         longTimer = setTimeout(() => {
-          if (travel < MOVE_SLOP && !scrolling && !spaceMode) {
+          if (travel < MOVE_SLOP && !scrolling && !spaceMode && !uiLeft && !padDragging && !selectArmed) {
             longFired = true;
             clearPendingSingle();
             lastTapAt = 0;
@@ -420,12 +475,17 @@
       if (e.touches.length === 2) {
         scrolling = true;
         clearLong();
+        endPadDrag();
+        selectArmed = false;
         last = cur;
         if (rawDy !== 0) queueScroll(-rawDy);
         return;
       }
       last = cur;
       if (travel < MOVE_SLOP) return;
+
+      // Glide alone = move only. Select only if double-tap armed or Left held.
+      if (selectArmed || uiLeft) beginPadDrag();
       queueMove(rawDx, rawDy);
     }, { passive: false });
 
@@ -437,6 +497,8 @@
       if (spaceMode && e.touches.length === 0) {
         clearPendingSingle();
         lastTapAt = 0;
+        selectArmed = false;
+        endPadDrag();
         const ax = Math.abs(spaceDx), ay = Math.abs(spaceDy);
         if (ax > SPACE_THRESHOLD || ay > SPACE_THRESHOLD) {
           if (ax >= ay) sendSpace(spaceDx < 0 ? SPACE_LEFT : SPACE_RIGHT);
@@ -446,23 +508,30 @@
         return;
       }
 
-      if (e.touches.length === 0 && wasTap()) {
-        if (lastTapAt && now - lastTapAt < DOUBLE_MS) {
-          clearPendingSingle();
-          lastTapAt = 0;
-          sendClick(BTN_DOUBLE);
-        } else {
-          lastTapAt = now;
-          clearPendingSingle();
-          pendingSingle = setTimeout(() => {
-            pendingSingle = 0;
-            lastTapAt = 0;
-            sendClick(BTN_LEFT);
-          }, DOUBLE_MS);
-        }
-      }
-
       if (e.touches.length === 0) {
+        const dragged = padDragging;
+        const armed = selectArmed;
+        endPadDrag();
+        selectArmed = false;
+
+        if (!dragged && wasTap()) {
+          if (armed) {
+            clearPendingSingle();
+            lastTapAt = 0;
+            sendClick(BTN_DOUBLE);
+          } else {
+            lastTapAt = now;
+            clearPendingSingle();
+            pendingSingle = setTimeout(() => {
+              pendingSingle = 0;
+              lastTapAt = 0;
+              sendClick(BTN_LEFT);
+            }, DOUBLE_MS);
+          }
+        } else if (dragged) {
+          lastTapAt = 0;
+        }
+
         if (raf) { cancelAnimationFrame(raf); flush(); }
         last = null; scrolling = false; spaceMode = false; travel = 0;
       } else {
@@ -472,6 +541,8 @@
 
     pad.addEventListener("touchcancel", () => {
       clearLong(); clearPendingSingle();
+      endPadDrag();
+      selectArmed = false;
       last = null; travel = 0; scrolling = false; spaceMode = false; longFired = false;
     });
 
@@ -499,7 +570,13 @@
       ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";
       ws.onopen = () => { setStatus("Live", "ok"); requestWakeLock(); };
-      ws.onclose = () => { setStatus("Reconnecting", "bad"); setTimeout(connect, 700); };
+      ws.onclose = () => {
+        uiLeft = false;
+        uiRight = false;
+        padDragging = false;
+        setStatus("Reconnecting", "bad");
+        setTimeout(connect, 700);
+      };
       ws.onerror = () => setStatus("Error", "bad");
     }
 

@@ -39,6 +39,8 @@ OP_MOVE = 1
 OP_SCROLL = 2
 OP_CLICK = 3
 OP_SPACE = 4
+OP_DOWN = 5
+OP_UP = 6
 BTN_LEFT = 0
 BTN_RIGHT = 1
 BTN_DOUBLE = 2
@@ -190,15 +192,21 @@ def decode_packet(data: bytes, pump: MotionPump, mouse: Mouse) -> None:
         elif len(data) >= 3:
             (dy_i,) = struct.unpack_from("<h", data, 1)
             pump.add_scroll(dy_i / SCALE_LEGACY)
+    elif op == OP_DOWN and len(data) >= 2:
+        pump.flush_now()
+        mouse.down("right" if data[1] == BTN_RIGHT else "left")
+    elif op == OP_UP and len(data) >= 2:
+        pump.flush_now()
+        mouse.up("right" if data[1] == BTN_RIGHT else "left")
     elif op == OP_CLICK and len(data) >= 2:
         pump.flush_now()
         btn = data[1]
         if btn == BTN_DOUBLE:
             pump.run_blocking(mouse.double_click)
         elif btn == BTN_RIGHT:
-            pump.run_blocking(lambda: mouse.click("right"))
+            mouse.click("right")
         else:
-            pump.run_blocking(lambda: mouse.click("left"))
+            mouse.click("left")
     elif op == OP_SPACE and len(data) >= 2:
         pump.flush_now()
         d = data[1]

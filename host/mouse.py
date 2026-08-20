@@ -78,6 +78,8 @@ class Mouse:
         self._LEFT_UP = 2
         self._RIGHT_DOWN = 3
         self._RIGHT_UP = 4
+        self._LEFT_DRAGGED = 6
+        self._RIGHT_DRAGGED = 7
         self._HID_TAP = 0
         self._PIXEL_UNITS = 0
         self._DELTA_X = 75
@@ -85,6 +87,8 @@ class Mouse:
 
         self._bounds = self._display_bounds()
         self._x, self._y = self._read_location()
+        self._left_held = False
+        self._right_held = False
         self._warn_accessibility()
 
     def _display_bounds(self) -> tuple[float, float, float, float]:
@@ -156,17 +160,41 @@ class Mouse:
         with self._lock:
             self._x, self._y = self._clamp(self._x + dx, self._y + dy)
             x, y = self._x, self._y
-        self._post_mouse(self._MOVED, x, y, 0, int(round(dx)), int(round(dy)))
+            left = self._left_held
+            right = self._right_held
+        if left:
+            etype, btn = self._LEFT_DRAGGED, 0
+        elif right:
+            etype, btn = self._RIGHT_DRAGGED, 1
+        else:
+            etype, btn = self._MOVED, 0
+        self._post_mouse(etype, x, y, btn, int(round(dx)), int(round(dy)))
 
-    def click(self, button: str = "left") -> None:
+    def down(self, button: str = "left") -> None:
         with self._lock:
             x, y = self._x, self._y
-        if button == "right":
-            down, up, btn = self._RIGHT_DOWN, self._RIGHT_UP, 1
-        else:
-            down, up, btn = self._LEFT_DOWN, self._LEFT_UP, 0
-        self._post_mouse(down, x, y, btn, 0, 0)
-        self._post_mouse(up, x, y, btn, 0, 0)
+            if button == "right":
+                self._right_held = True
+                etype, btn = self._RIGHT_DOWN, 1
+            else:
+                self._left_held = True
+                etype, btn = self._LEFT_DOWN, 0
+        self._post_mouse(etype, x, y, btn, 0, 0)
+
+    def up(self, button: str = "left") -> None:
+        with self._lock:
+            x, y = self._x, self._y
+            if button == "right":
+                self._right_held = False
+                etype, btn = self._RIGHT_UP, 1
+            else:
+                self._left_held = False
+                etype, btn = self._LEFT_UP, 0
+        self._post_mouse(etype, x, y, btn, 0, 0)
+
+    def click(self, button: str = "left") -> None:
+        self.down(button)
+        self.up(button)
 
     def double_click(self) -> None:
         self.click("left")
