@@ -1,0 +1,17 @@
+host/mouse_injector
+host/__pycache__/
+host/.venv/
+*.pyc
+*.log
+.DS_Store
+.env
+.env.*
+
+# Local / planning noise
+task_plan.md
+findings.md
+progress.md
+.planning/
+docs/superpowers/
+client/
+.plan-attestation

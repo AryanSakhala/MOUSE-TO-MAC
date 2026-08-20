@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>Mouse to Mac</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #0b1220; color: #e2e8f0;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden; touch-action: none; user-select: none;
+    }
+    #ui {
+      height: 100%; display: flex; flex-direction: column;
+      padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 12px 0 8px;
+    }
+    h1 { font-size: 18px; margin: 0; letter-spacing: -0.02em; }
+    #status {
+      font-size: 12px; font-weight: 600; padding: 6px 10px;
+      border-radius: 999px; background: #1f2937;
+    }
+    #status.ok { background: #14532d; color: #86efac; }
+    #status.bad { background: #7f1d1d; color: #fecaca; }
+    #pad {
+      flex: 1; border-radius: 24px; background: #111827;
+      border: 1px solid #1f2937; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 8px; margin: 8px 0;
+    }
+    #pad strong { font-size: 22px; }
+    #pad span { color: #64748b; font-size: 13px; text-align: center; padding: 0 20px; line-height: 1.4; }
+    .row { display: flex; gap: 12px; padding-bottom: 12px; }
+    button {
+      flex: 1; border: 0; border-radius: 14px; padding: 16px;
+      background: #1e293b; color: #f8fafc; font-weight: 700; font-size: 16px;
+    }
+    .hint { color: #64748b; font-size: 12px; text-align: center; padding-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <header>
+      <h1>Mouse to Mac</h1>
+      <div id="status">Connecting…</div>
+    </header>
+    <div id="pad">
+      <strong>Trackpad</strong>
+      <span>Drag · tap · double-tap · long-press right · 2-finger scroll · 3-finger swipe Spaces</span>
+    </div>
+    <div class="row">
+      <button type="button" id="left">Left</button>
+      <button type="button" id="right">Right</button>
+      <button type="button" id="dbl">Double</button>
+    </div>
+    <p class="hint">3-finger: left/right = desktops · up = Mission Control · down = App windows</p>
+  </div>
+  <script>
+    const SCALE = 64;
+    const OP_MOVE = 1, OP_SCROLL = 2, OP_CLICK = 3, OP_SPACE = 4;
+    const BTN_LEFT = 0, BTN_RIGHT = 1, BTN_DOUBLE = 2;
+    const SPACE_LEFT = 0, SPACE_RIGHT = 1, SPACE_UP = 2, SPACE_DOWN = 3;
+
+    const statusEl = document.getElementById("status");
+    const pad = document.getElementById("pad");
+    const sensitivity = 1.35;
+    const SPACE_THRESHOLD = 80;
+    const DOUBLE_MS = 280;
+
+    let ws = null;
+    let last = null;
+    let grantAt = 0;
+    let moved = false;
+    let scrolling = false;
+    let spaceMode = false;
+    let spaceDx = 0, spaceDy = 0;
+    let lastTapAt = 0;
+    let accDx = 0, accDy = 0, accScroll = 0;
+    let raf = 0;
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = cls || "";
+    }
+
+    function packMove(dx, dy) {
+      const buf = new ArrayBuffer(5);
+      const v = new DataView(buf);
+      v.setUint8(0, OP_MOVE);
+      v.setInt16(1, Math.max(-32767, Math.min(32767, Math.round(dx * SCALE))), true);
+      v.setInt16(3, Math.max(-32767, Math.min(32767, Math.round(dy * SCALE))), true);
+      return buf;
+    }
+    function packScroll(dy) {
+      const buf = new ArrayBuffer(3);
+      const v = new DataView(buf);
+      v.setUint8(0, OP_SCROLL);
+      v.setInt16(1, Math.max(-32767, Math.min(32767, Math.round(dy * SCALE))), true);
+      return buf;
+    }
+    function packClick(btn) {
+      const buf = new ArrayBuffer(2);
+      const v = new DataView(buf);
+      v.setUint8(0, OP_CLICK);
+      v.setUint8(1, btn);
+      return buf;
+    }
+    function packSpace(dir) {
+      const buf = new ArrayBuffer(2);
+      const v = new DataView(buf);
+      v.setUint8(0, OP_SPACE);
+      v.setUint8(1, dir);
+      return buf;
+    }
+
+    function flush() {
+      raf = 0;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        accDx = accDy = accScroll = 0;
+        return;
+      }
+      if (accDx !== 0 || accDy !== 0) {
+        ws.send(packMove(accDx, accDy));
+        accDx = accDy = 0;
+      }
+      if (accScroll !== 0) {
+        ws.send(packScroll(accScroll));
+        accScroll = 0;
+      }
+    }
+
+    function queueMove(dx, dy) {
+      accDx += dx; accDy += dy;
+      if (!raf) raf = requestAnimationFrame(flush);
+    }
+    function queueScroll(dy) {
+      accScroll += dy;
+      if (!raf) raf = requestAnimationFrame(flush);
+    }
+    function sendClick(btn) {
+      if (raf) { cancelAnimationFrame(raf); flush(); }
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(packClick(btn));
+    }
+    function sendSpace(dir) {
+      if (raf) { cancelAnimationFrame(raf); flush(); }
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(packSpace(dir));
+    }
+
+    async function requestWakeLock() {
+      try {
+        if ("wakeLock" in navigator) await navigator.wakeLock.request("screen");
+      } catch (_) {}
+    }
+
+    function midTouches(touches) {
+      let x = 0, y = 0;
+      for (let i = 0; i < touches.length; i++) {
+        x += touches[i].clientX;
+        y += touches[i].clientY;
+      }
+      return { x: x / touches.length, y: y / touches.length };
+    }
+
+    pad.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      grantAt = performance.now();
+      moved = false;
+      scrolling = e.touches.length === 2;
+      spaceMode = e.touches.length >= 3;
+      spaceDx = spaceDy = 0;
+      last = midTouches(e.touches);
+    }, { passive: false });
+
+    pad.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      if (!last) return;
+      const cur = midTouches(e.touches);
+
+      if (e.touches.length >= 3 || spaceMode) {
+        spaceMode = true;
+        spaceDx += cur.x - last.x;
+        spaceDy += cur.y - last.y;
+        last = cur;
+        moved = true;
+        return;
+      }
+
+      if (e.touches.length === 2) {
+        scrolling = true;
+        const dy = (cur.y - last.y) * sensitivity;
+        last = cur;
+        if (dy !== 0) { moved = true; queueScroll(-dy); }
+        return;
+      }
+
+      const dx = (cur.x - last.x) * sensitivity;
+      const dy = (cur.y - last.y) * sensitivity;
+      last = cur;
+      if (dx !== 0 || dy !== 0) { moved = true; queueMove(dx, dy); }
+    }, { passive: false });
+
+    pad.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      const now = performance.now();
+      const dt = now - grantAt;
+
+      if (spaceMode && e.touches.length === 0) {
+        const ax = Math.abs(spaceDx), ay = Math.abs(spaceDy);
+        if (ax > SPACE_THRESHOLD || ay > SPACE_THRESHOLD) {
+          if (ax >= ay) sendSpace(spaceDx < 0 ? SPACE_LEFT : SPACE_RIGHT);
+          else sendSpace(spaceDy < 0 ? SPACE_UP : SPACE_DOWN);
+        }
+        spaceMode = false;
+        last = null;
+        scrolling = false;
+        return;
+      }
+
+      if (!moved && !scrolling && e.touches.length === 0) {
+        if (dt >= 420) {
+          sendClick(BTN_RIGHT);
+          lastTapAt = 0;
+        } else if (now - lastTapAt < DOUBLE_MS) {
+          sendClick(BTN_DOUBLE);
+          lastTapAt = 0;
+        } else {
+          lastTapAt = now;
+          // Delay single click so a second tap can become double-click
+          const scheduled = lastTapAt;
+          setTimeout(() => {
+            if (lastTapAt === scheduled) {
+              sendClick(BTN_LEFT);
+              lastTapAt = 0;
+            }
+          }, DOUBLE_MS);
+        }
+      }
+
+      if (e.touches.length === 0) {
+        last = null;
+        scrolling = false;
+        spaceMode = false;
+      } else {
+        last = midTouches(e.touches);
+      }
+    }, { passive: false });
+
+    document.getElementById("left").onclick = () => sendClick(BTN_LEFT);
+    document.getElementById("right").onclick = () => sendClick(BTN_RIGHT);
+    document.getElementById("dbl").onclick = () => sendClick(BTN_DOUBLE);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") requestWakeLock();
+    });
+
+    function connect() {
+      const url = (location.protocol === "https:" ? "wss://" : "ws://")
+        + location.host + "/" + location.search;
+      setStatus("Connecting…");
+      ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => { setStatus("Connected", "ok"); requestWakeLock(); };
+      ws.onclose = () => { setStatus("Reconnecting…", "bad"); setTimeout(connect, 700); };
+      ws.onerror = () => setStatus("Error", "bad");
+    }
+
+    connect();
+  </script>
+</body>
+</html>
