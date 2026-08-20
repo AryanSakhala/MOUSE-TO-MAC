@@ -1,6 +1,6 @@
 # Mouse to Mac
 
-Use an Android phone as a Mac trackpad over the phone hotspot. No phone app.
+Android phone as a Mac trackpad over the phone hotspot. No phone app.
 
 ## Setup
 
@@ -13,7 +13,7 @@ cd host
 bash start.sh
 ```
 
-4. Scan the QR code in the terminal (or open the printed URL) on the phone.
+4. Scan the QR in the terminal (or open the printed URL).
 
 ## Gestures
 
@@ -23,18 +23,12 @@ bash start.sh
 | Tap | Click |
 | Double-tap | Double-click |
 | Long-press | Right-click |
+| Top Left / Right | Mouse buttons |
 | Two-finger drag | Scroll |
-| Three-finger left / right | Switch desktop (Spaces) |
+| Three-finger left / right | Switch desktop |
 | Three-finger up | Mission Control |
 | Three-finger down | App windows |
 
-## Layout
+Speed controls sit under the trackpad.
 
-```
-host/server.py          WebSocket + HTTP host
-host/mouse.py           CoreGraphics injection
-host/static/trackpad.html
-host/start.sh
-```
-
-Each run prints a new access key in the URL (`?k=`). Only that key can open the trackpad.
+Each run prints a new access key (`?k=`). Only that key opens the trackpad.

@@ -28,28 +28,25 @@ try:
 except ImportError:
     qrcode = None  # type: ignore
 
-from mouse import Mouse
+from mouse import MotionPump, Mouse
 
 PORT = int(os.environ.get("MOUSE_TO_MAC_PORT", "8765"))
 ROOT = Path(__file__).resolve().parent
 TRACKPAD_PATH = ROOT / "static" / "trackpad.html"
-SCALE = 64.0
 
+# Protocol: float32 moves (v3). Legacy int16 still accepted.
 OP_MOVE = 1
 OP_SCROLL = 2
 OP_CLICK = 3
-OP_SPACE = 4  # desktop / Mission Control swipe
-
-# click button bytes
+OP_SPACE = 4
 BTN_LEFT = 0
 BTN_RIGHT = 1
 BTN_DOUBLE = 2
-
-# space directions
 SPACE_LEFT = 0
 SPACE_RIGHT = 1
 SPACE_UP = 2
 SPACE_DOWN = 3
+SCALE_LEGACY = 64.0
 
 TOKEN = secrets.token_urlsafe(8)
 
@@ -111,53 +108,6 @@ def print_qr(url: str) -> None:
     print(flush=True)
 
 
-class MoveCoalescer:
-    def __init__(self, mouse: Mouse, hz: float = 250.0) -> None:
-        self.mouse = mouse
-        self.dx = 0.0
-        self.dy = 0.0
-        self.scroll = 0.0
-        self._interval = 1.0 / hz
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run())
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-
-    def add_move(self, dx: float, dy: float) -> None:
-        self.dx += dx
-        self.dy += dy
-
-    def add_scroll(self, dy: float) -> None:
-        self.scroll += dy
-
-    def flush_move(self) -> None:
-        if self.dx or self.dy:
-            self.mouse.move(self.dx, self.dy)
-            self.dx = self.dy = 0.0
-
-    async def _run(self) -> None:
-        while True:
-            await asyncio.sleep(self._interval)
-            dx, dy, sc = self.dx, self.dy, self.scroll
-            if dx == 0.0 and dy == 0.0 and sc == 0.0:
-                continue
-            self.dx -= dx
-            self.dy -= dy
-            self.scroll -= sc
-            if dx or dy:
-                self.mouse.move(dx, dy)
-            if sc:
-                self.mouse.scroll(sc)
-
-
 def unlock_page() -> str:
     return """<!DOCTYPE html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
@@ -217,46 +167,55 @@ def enable_nodelay(ws: ServerConnection) -> None:
         sock = transport.get_extra_info("socket")
         if sock is not None:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     except Exception:
         pass
 
 
-def decode_packet(data: bytes, coalescer: MoveCoalescer, mouse: Mouse) -> None:
+def decode_packet(data: bytes, pump: MotionPump, mouse: Mouse) -> None:
     if not data:
         return
     op = data[0]
-    if op == OP_MOVE and len(data) >= 5:
-        dx_i, dy_i = struct.unpack_from("<hh", data, 1)
-        coalescer.add_move(dx_i / SCALE, dy_i / SCALE)
-    elif op == OP_SCROLL and len(data) >= 3:
-        (dy_i,) = struct.unpack_from("<h", data, 1)
-        coalescer.add_scroll(dy_i / SCALE)
+    if op == OP_MOVE:
+        if len(data) >= 9:
+            dx, dy = struct.unpack_from("<ff", data, 1)
+            pump.add_move(dx, dy)
+        elif len(data) >= 5:
+            dx_i, dy_i = struct.unpack_from("<hh", data, 1)
+            pump.add_move(dx_i / SCALE_LEGACY, dy_i / SCALE_LEGACY)
+    elif op == OP_SCROLL:
+        if len(data) >= 5:
+            (dy,) = struct.unpack_from("<f", data, 1)
+            pump.add_scroll(dy)
+        elif len(data) >= 3:
+            (dy_i,) = struct.unpack_from("<h", data, 1)
+            pump.add_scroll(dy_i / SCALE_LEGACY)
     elif op == OP_CLICK and len(data) >= 2:
-        coalescer.flush_move()
+        pump.flush_now()
         btn = data[1]
         if btn == BTN_DOUBLE:
-            mouse.double_click()
+            pump.run_blocking(mouse.double_click)
         elif btn == BTN_RIGHT:
-            mouse.click("right")
+            pump.run_blocking(lambda: mouse.click("right"))
         else:
-            mouse.click("left")
+            pump.run_blocking(lambda: mouse.click("left"))
     elif op == OP_SPACE and len(data) >= 2:
-        coalescer.flush_move()
+        pump.flush_now()
         d = data[1]
         if d == SPACE_LEFT:
-            mouse.space_left()
+            pump.run_blocking(mouse.space_left)
         elif d == SPACE_RIGHT:
-            mouse.space_right()
+            pump.run_blocking(mouse.space_right)
         elif d == SPACE_UP:
-            mouse.mission_control()
+            pump.run_blocking(mouse.mission_control)
         elif d == SPACE_DOWN:
-            mouse.app_windows()
+            pump.run_blocking(mouse.app_windows)
 
 
 _active: ServerConnection | None = None
 
 
-async def handler(ws: ServerConnection, mouse: Mouse, coalescer: MoveCoalescer) -> None:
+async def handler(ws: ServerConnection, mouse: Mouse, pump: MotionPump) -> None:
     global _active
     enable_nodelay(ws)
 
@@ -274,7 +233,7 @@ async def handler(ws: ServerConnection, mouse: Mouse, coalescer: MoveCoalescer) 
         await ws.send(struct.pack("<B", 0x7F))
         async for raw in ws:
             if isinstance(raw, bytes):
-                decode_packet(raw, coalescer, mouse)
+                decode_packet(raw, pump, mouse)
     except ConnectionClosed:
         pass
     finally:
@@ -285,8 +244,8 @@ async def handler(ws: ServerConnection, mouse: Mouse, coalescer: MoveCoalescer) 
 
 async def main() -> None:
     mouse = Mouse()
-    coalescer = MoveCoalescer(mouse, hz=250.0)
-    coalescer.start()
+    pump = MotionPump(mouse, hz=144.0)
+    pump.start()
     ips = lan_ips() or ["127.0.0.1"]
     primary = ips[0]
     url = f"http://{primary}:{PORT}/?k={TOKEN}"
@@ -314,7 +273,7 @@ async def main() -> None:
     signal.signal(signal.SIGTERM, _stop)
 
     async def on_connect(ws: ServerConnection) -> None:
-        await handler(ws, mouse, coalescer)
+        await handler(ws, mouse, pump)
 
     try:
         async with serve(
@@ -329,7 +288,7 @@ async def main() -> None:
             print(f"listening on 0.0.0.0:{PORT}", flush=True)
             await stop
     finally:
-        await coalescer.stop()
+        pump.stop()
 
 
 if __name__ == "__main__":
