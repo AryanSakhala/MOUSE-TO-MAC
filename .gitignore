@@ -1,6 +1,7 @@
 host/mouse_injector
 host/__pycache__/
 host/.venv/
+host/certs/
 *.pyc
 *.log
 .DS_Store

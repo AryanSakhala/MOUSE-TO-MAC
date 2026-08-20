@@ -33,8 +33,8 @@
     #app {
       height: 100%;
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr) auto;
-      gap: 12px;
+      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+      gap: 10px;
       padding: calc(12px + var(--safe-t)) 14px calc(12px + var(--safe-b));
     }
     .topbar {
@@ -58,6 +58,22 @@
     #status.bad { color: var(--danger); border-color: rgba(248,113,113,0.25); }
     #status.bad i { background: var(--danger); }
 
+    .modes {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .mode {
+      appearance: none; border: 1px solid var(--line);
+      background: var(--surface); color: var(--muted);
+      border-radius: 14px; padding: 10px 12px;
+      font-weight: 650; font-size: 13px;
+    }
+    .mode.on {
+      color: var(--text);
+      border-color: rgba(110,231,183,0.4);
+      background: linear-gradient(180deg, #1a2430, #121820);
+      box-shadow: inset 0 0 0 1px rgba(110,231,183,0.12);
+    }
+
     .mouse-top {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -70,7 +86,7 @@
     }
     .mbtn {
       appearance: none; border: 0; cursor: pointer;
-      min-height: 74px;
+      min-height: 68px;
       border-radius: 22px;
       background: linear-gradient(180deg, #222836, #171c26);
       color: var(--text);
@@ -79,7 +95,6 @@
       font-weight: 650; font-size: 13px; letter-spacing: 0.02em;
       transition: transform 80ms ease, background 80ms ease, box-shadow 80ms ease;
       box-shadow: 0 8px 18px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05);
-      -webkit-user-select: none; user-select: none;
     }
     .mbtn small {
       font-size: 10px; font-weight: 600; color: var(--muted);
@@ -91,7 +106,7 @@
       box-shadow: inset 0 2px 8px rgba(0,0,0,0.45);
     }
 
-    #pad {
+    #pad, #air {
       position: relative;
       min-height: 0;
       border-radius: var(--radius);
@@ -103,7 +118,7 @@
       display: grid;
       place-items: center;
     }
-    #pad.dragging {
+    #pad.dragging, #air.live {
       border-color: rgba(110,231,183,0.45);
       box-shadow: inset 0 0 0 1px rgba(110,231,183,0.12);
     }
@@ -114,16 +129,108 @@
       border: 1px dashed rgba(139,147,167,0.18);
       pointer-events: none;
     }
-    .pad-copy {
-      text-align: center; pointer-events: none; z-index: 1;
-      padding: 0 28px;
+    .pad-copy, .air-copy {
+      text-align: center; z-index: 1;
+      padding: 0 24px;
     }
-    .pad-copy strong {
+    .pad-copy { pointer-events: none; }
+    .pad-copy strong, .air-copy strong {
       display: block; font-size: 18px; font-weight: 650;
       letter-spacing: -0.02em; margin-bottom: 8px;
     }
-    .pad-copy p {
+    .pad-copy p, .air-copy p {
       margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45;
+    }
+    .air-actions {
+      display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+      margin-top: 16px;
+    }
+    .air-actions button {
+      appearance: none; border: 1px solid var(--line);
+      background: var(--surface-2); color: var(--text);
+      border-radius: 12px; padding: 10px 14px;
+      font-weight: 650; font-size: 13px;
+    }
+    .air-actions button:active { background: var(--press); }
+    .air-actions button.primary {
+      border-color: rgba(110,231,183,0.35);
+      background: #1a2a24; color: var(--accent);
+    }
+    #air { display: none; }
+    body.mode-air #pad { display: none; }
+    body.mode-air #air { display: grid; }
+    body.mode-air #app { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+    .tilt-meter {
+      position: relative;
+      width: min(56vw, 220px);
+      height: min(56vw, 220px);
+      margin: 0 auto 14px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(circle at center, rgba(110,231,183,0.08), transparent 55%),
+        var(--surface-2);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+    }
+    .tilt-meter::before,
+    .tilt-meter::after {
+      content: "";
+      position: absolute;
+      background: rgba(139,147,167,0.28);
+      pointer-events: none;
+    }
+    .tilt-meter::before { left: 50%; top: 12%; bottom: 12%; width: 1px; transform: translateX(-50%); }
+    .tilt-meter::after { top: 50%; left: 12%; right: 12%; height: 1px; transform: translateY(-50%); }
+    .tilt-dead {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 36%; height: 36%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      border: 1px dashed rgba(110,231,183,0.35);
+      pointer-events: none;
+    }
+    .tilt-rim {
+      position: absolute;
+      inset: 8%;
+      border-radius: 50%;
+      border: 1px solid rgba(139,147,167,0.22);
+      pointer-events: none;
+    }
+    .tilt-labels {
+      display: flex; justify-content: space-between;
+      width: min(56vw, 220px); margin: -6px auto 10px;
+      font-size: 10px; color: var(--muted); font-weight: 650;
+      letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    #tiltDot {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 18px; height: 18px;
+      margin: -9px 0 0 -9px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 16px rgba(110,231,183,0.45);
+      transform: translate(0px, 0px);
+      transition: transform 50ms linear, background 120ms ease;
+      will-change: transform;
+    }
+    #tiltDot.active { background: #a7f3d0; }
+    #tiltDot.axis-x { box-shadow: 0 0 18px rgba(110,231,183,0.7); }
+    .air-toggles {
+      display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .air-toggles button {
+      appearance: none; border: 1px solid var(--line);
+      background: var(--surface); color: var(--muted);
+      border-radius: 10px; padding: 8px 12px;
+      font-weight: 650; font-size: 12px;
+    }
+    .air-toggles button.on {
+      color: var(--accent);
+      border-color: rgba(110,231,183,0.35);
+      background: #1a2a24;
     }
     #ripple {
       position: absolute; width: 54px; height: 54px; margin: -27px 0 0 -27px;
@@ -164,14 +271,27 @@
       margin: 0; text-align: center;
       color: var(--muted); font-size: 11px; line-height: 1.4;
     }
+    #httpsWarn {
+      display: none; margin: 0; padding: 8px 10px; border-radius: 12px;
+      background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.25);
+      color: #fecaca; font-size: 12px; line-height: 1.4;
+    }
+    #httpsWarn.show { display: block; }
   </style>
 </head>
-<body>
+<body class="mode-pad">
   <div id="app">
     <header class="topbar">
       <div class="brand">Mouse <span>to Mac</span></div>
       <div id="status"><i></i><b>Connecting</b></div>
     </header>
+
+    <p id="httpsWarn">Air / IMU needs HTTPS. Open the https:// URL from the Mac QR (accept the cert warning once).</p>
+
+    <div class="modes" role="tablist">
+      <button type="button" class="mode on" id="modePad" aria-pressed="true">Pad</button>
+      <button type="button" class="mode" id="modeAir" aria-pressed="false">Air</button>
+    </div>
 
     <div class="mouse-top" aria-label="Mouse buttons">
       <button type="button" class="mbtn left" id="left" aria-label="Left click">
@@ -192,16 +312,37 @@
       </div>
     </div>
 
+    <div id="air" role="application" aria-label="Air mouse">
+      <div class="air-copy">
+        <strong>Remote pointer</strong>
+        <div class="tilt-meter" aria-hidden="true">
+          <div class="tilt-rim"></div>
+          <div class="tilt-dead"></div>
+          <div id="tiltDot"></div>
+        </div>
+        <div class="tilt-labels"><span>← left</span><span>right →</span></div>
+        <p id="airHint">Hold like a TV remote. Enable → Recenter upright → tilt only left/right or tip forward/back. Center = stop.</p>
+        <div class="air-actions">
+          <button type="button" class="primary" id="enableSensors">Enable sensors</button>
+          <button type="button" id="recenterBtn">Recenter</button>
+        </div>
+        <div class="air-toggles">
+          <button type="button" class="on" id="btnCardinal" aria-pressed="true">Cardinal lock</button>
+          <button type="button" class="on" id="btnHaptic" aria-pressed="true">Vibration</button>
+        </div>
+      </div>
+    </div>
+
     <div class="dock">
       <div class="sens">
         <label>Speed</label>
         <button type="button" class="chip" id="sensDown" aria-label="Slower">−</button>
-        <div id="sensVal">1.8</div>
+        <div id="sensVal">1.2</div>
         <button type="button" class="chip" id="sensUp" aria-label="Faster">+</button>
       </div>
       <div></div>
       <div></div>
-      <p class="tips">1-finger glide = move only · double-tap then hold &amp; drag = select · 2-finger = scroll</p>
+      <p class="tips" id="tips">1-finger glide = move · double-tap then hold &amp; drag = select · 2-finger = scroll</p>
     </div>
   </div>
 
@@ -213,13 +354,28 @@
     const statusEl = document.getElementById("status");
     const statusText = statusEl.querySelector("b");
     const pad = document.getElementById("pad");
+    const air = document.getElementById("air");
     const leftBtn = document.getElementById("left");
     const rightBtn = document.getElementById("right");
     const ripple = document.getElementById("ripple");
     const sensVal = document.getElementById("sensVal");
+    const tips = document.getElementById("tips");
+    const airHint = document.getElementById("airHint");
+    const httpsWarn = document.getElementById("httpsWarn");
+    const modePad = document.getElementById("modePad");
+    const modeAir = document.getElementById("modeAir");
 
-    let baseGain = 1.75;
-    const ACCEL = 0.055;
+    let mode = "pad"; // pad | air
+    let baseGain = 1.2;
+    const TOUCH_ACCEL = 0.055;
+    // Remote / joystick Air (research: deadzone 8–12°, circular clamp, cubic curve, haptics)
+    const AIR_ANGLE_DZ = 9;        // ° — ignore hand tremor / micro lean
+    const AIR_ANGLE_MAX = 26;      // ° — full stick throw (comfortable remote lean)
+    const AIR_EMA = 0.18;
+    const AIR_GAIN = 9.5;          // px/frame at full tilt & speed 1.0
+    const AIR_MAX_STEP = 14;
+    const AIR_CURVE = 1.55;        // cubic-ish soft start near center
+    const AIR_DOMINANCE = 1.45;    // if one axis clearly wins, lock to it (remote cardinal feel)
     const SPACE_THRESHOLD = 80;
     const MOVE_SLOP = 8;
     const DOUBLE_MS = 420;
@@ -243,6 +399,41 @@
     let uiLeft = false;
     let uiRight = false;
     let padDragging = false;
+
+    // Air / IMU — remote-style tilt stick (roll + pitch only; yaw ignored)
+    let sensorsOn = false;
+    let airActive = false;
+    let baseBeta = null, baseGamma = null;
+    let curBeta = null, curGamma = null;
+    let smoothTiltX = 0, smoothTiltY = 0;
+    let airRaf = 0;
+    let calibrated = false;
+    let cardinalLock = true;
+    let hapticsOn = true;
+    let hapArmed = false;   // left deadzone
+    let hapRim = false;     // at outer rim
+    let hapLastAt = 0;
+    const tiltDot = document.getElementById("tiltDot");
+    const btnCardinal = document.getElementById("btnCardinal");
+    const btnHaptic = document.getElementById("btnHaptic");
+
+    function buzz(pattern) {
+      if (!hapticsOn || mode !== "air") return;
+      const now = performance.now();
+      if (now - hapLastAt < 45) return; // don't stack motor pulses
+      hapLastAt = now;
+      try {
+        if (typeof navigator.vibrate === "function") navigator.vibrate(pattern);
+      } catch (_) {}
+    }
+
+    function buzzNow(pattern) {
+      if (!hapticsOn) return;
+      try {
+        if (typeof navigator.vibrate === "function") navigator.vibrate(pattern);
+      } catch (_) {}
+    }
+
     const moveBuf = new ArrayBuffer(9);
     const moveView = new DataView(moveBuf);
     const scrollBuf = new ArrayBuffer(5);
@@ -262,10 +453,10 @@
       ripple.classList.add("on");
     }
 
-    function accel(dx, dy) {
+    function touchAccel(dx, dy) {
       const mag = Math.hypot(dx, dy);
       if (mag < 0.001) return [0, 0];
-      const gain = baseGain * (1 + ACCEL * mag);
+      const gain = baseGain * (1 + TOUCH_ACCEL * mag);
       return [dx * gain, dy * gain];
     }
 
@@ -323,10 +514,13 @@
       if (!raf) raf = requestAnimationFrame(flush);
     }
 
-    function queueMove(dx, dy) {
-      const [ax, ay] = accel(dx, dy);
-      accDx += ax; accDy += ay;
+    function queueMoveRaw(dx, dy) {
+      accDx += dx; accDy += dy;
       scheduleFlush();
+    }
+    function queueMove(dx, dy) {
+      const [ax, ay] = touchAccel(dx, dy);
+      queueMoveRaw(ax, ay);
     }
     function queueScroll(dy) {
       accScroll += dy * baseGain;
@@ -399,10 +593,12 @@
         if (which === BTN_LEFT) {
           if (uiLeft) return;
           uiLeft = true;
+          if (mode === "air") buzzNow(12);
           sendDown(BTN_LEFT);
         } else {
           if (uiRight) return;
           uiRight = true;
+          if (mode === "air") buzzNow(12);
           sendDown(BTN_RIGHT);
         }
       };
@@ -429,7 +625,9 @@
     bindHold(leftBtn, BTN_LEFT);
     bindHold(rightBtn, BTN_RIGHT);
 
+    /* —— Pad gestures —— */
     pad.addEventListener("touchstart", (e) => {
+      if (mode !== "pad") return;
       e.preventDefault();
       const now = performance.now();
       travel = 0;
@@ -439,11 +637,8 @@
       spaceDx = spaceDy = 0;
       last = midTouches(e.touches);
       clearLong();
-
-      // Second tap soon after first → arm select (do not click yet)
       selectArmed = !!(e.touches.length === 1 && lastTapAt && (now - lastTapAt) < DOUBLE_MS);
       if (selectArmed) clearPendingSingle();
-
       if (e.touches.length === 1) {
         flashRipple(e.touches[0].clientX, e.touches[0].clientY);
         longTimer = setTimeout(() => {
@@ -458,6 +653,7 @@
     }, { passive: false });
 
     pad.addEventListener("touchmove", (e) => {
+      if (mode !== "pad") return;
       e.preventDefault();
       if (!last) return;
       const cur = midTouches(e.touches);
@@ -465,7 +661,6 @@
       const rawDy = cur.y - last.y;
       travel += Math.hypot(rawDx, rawDy);
       if (travel >= MOVE_SLOP) clearLong();
-
       if (e.touches.length >= 3 || spaceMode) {
         spaceMode = true;
         spaceDx += rawDx; spaceDy += rawDy;
@@ -483,17 +678,15 @@
       }
       last = cur;
       if (travel < MOVE_SLOP) return;
-
-      // Glide alone = move only. Select only if double-tap armed or Left held.
       if (selectArmed || uiLeft) beginPadDrag();
       queueMove(rawDx, rawDy);
     }, { passive: false });
 
     pad.addEventListener("touchend", (e) => {
+      if (mode !== "pad") return;
       e.preventDefault();
       clearLong();
       const now = performance.now();
-
       if (spaceMode && e.touches.length === 0) {
         clearPendingSingle();
         lastTapAt = 0;
@@ -507,13 +700,11 @@
         spaceMode = false; last = null; scrolling = false;
         return;
       }
-
       if (e.touches.length === 0) {
         const dragged = padDragging;
         const armed = selectArmed;
         endPadDrag();
         selectArmed = false;
-
         if (!dragged && wasTap()) {
           if (armed) {
             clearPendingSingle();
@@ -531,7 +722,6 @@
         } else if (dragged) {
           lastTapAt = 0;
         }
-
         if (raf) { cancelAnimationFrame(raf); flush(); }
         last = null; scrolling = false; spaceMode = false; travel = 0;
       } else {
@@ -545,6 +735,239 @@
       selectArmed = false;
       last = null; travel = 0; scrolling = false; spaceMode = false; longFired = false;
     });
+
+    /* —— Air / IMU: tilt-from-center joystick —— */
+    function angleDelta(cur, base) {
+      let d = cur - base;
+      if (d > 180) d -= 360;
+      if (d < -180) d += 360;
+      return d;
+    }
+
+    function softAxis(deg) {
+      const a = Math.abs(deg);
+      if (a < AIR_ANGLE_DZ) return 0;
+      const signed = deg - Math.sign(deg) * AIR_ANGLE_DZ;
+      const span = AIR_ANGLE_MAX - AIR_ANGLE_DZ;
+      const n = Math.max(-1, Math.min(1, signed / span));
+      return Math.sign(n) * Math.pow(Math.abs(n), AIR_CURVE);
+    }
+
+    /** Joystick gate: circle clamp + optional cardinal lock (remote feel). */
+    function remoteStick(nx, ny) {
+      let x = nx, y = ny;
+      const mag = Math.hypot(x, y);
+      if (mag > 1) {
+        x /= mag;
+        y /= mag;
+      }
+      if (cardinalLock) {
+        const ax = Math.abs(x), ay = Math.abs(y);
+        if (ax > ay * AIR_DOMINANCE) y = 0;
+        else if (ay > ax * AIR_DOMINANCE) x = 0;
+        else if (ax > 0.08 && ay > 0.08) {
+          // Ambiguous diagonal: bias to stronger axis only (no free 45° drift)
+          if (ax >= ay) y = 0;
+          else x = 0;
+        }
+      }
+      return [x, y];
+    }
+
+    function updateTiltDot(nx, ny) {
+      const r = 68;
+      tiltDot.style.transform = `translate(${nx * r}px, ${ny * r}px)`;
+      const active = Math.hypot(nx, ny) > 0.02;
+      tiltDot.classList.toggle("active", active);
+      tiltDot.classList.toggle("axis-x", Math.abs(nx) > Math.abs(ny) && active);
+    }
+
+    function onDeviceOrientation(e) {
+      if (!airActive || mode !== "air") return;
+      if (e.beta == null || e.gamma == null) return;
+      curBeta = e.beta;
+      curGamma = e.gamma;
+      if (!calibrated || baseBeta == null || baseGamma == null) return;
+
+      // Remote grip: ONLY roll (γ) + pitch (β). Yaw (α) is ignored on purpose.
+      const dRoll = angleDelta(e.gamma, baseGamma);
+      const dPitch = angleDelta(e.beta, baseBeta);
+
+      smoothTiltX = AIR_EMA * dRoll + (1 - AIR_EMA) * smoothTiltX;
+      smoothTiltY = AIR_EMA * dPitch + (1 - AIR_EMA) * smoothTiltY;
+      ensureAirLoop();
+    }
+
+    function airFrame() {
+      airRaf = 0;
+      if (!airActive || mode !== "air") return;
+
+      let nx = softAxis(smoothTiltX);
+      let ny = softAxis(smoothTiltY);
+      [nx, ny] = remoteStick(nx, ny);
+
+      // Invert pitch so tipping top toward you = cursor up (friendlier remote feel)
+      const stickX = nx;
+      const stickY = -ny;
+      updateTiltDot(stickX, stickY);
+
+      const stick = Math.hypot(stickX, stickY);
+      if (stick > 0.04) {
+        if (hapArmed) {
+          hapArmed = false;
+          buzz(14); // leave deadzone — tactile "engaged"
+        }
+      } else {
+        hapArmed = true;
+        hapRim = false;
+      }
+      if (stick > 0.92) {
+        if (!hapRim) {
+          hapRim = true;
+          buzz(22); // outer rim — full throw
+        }
+      } else if (stick < 0.7) {
+        hapRim = false;
+      }
+
+      const scale = baseGain * AIR_GAIN;
+      let dx = stickX * scale;
+      let dy = stickY * scale;
+      dx = Math.max(-AIR_MAX_STEP, Math.min(AIR_MAX_STEP, dx));
+      dy = Math.max(-AIR_MAX_STEP, Math.min(AIR_MAX_STEP, dy));
+      if (dx || dy) queueMoveRaw(dx, dy);
+
+      if (stick > 0.001 || Math.hypot(accDx, accDy) > 0) {
+        ensureAirLoop();
+      }
+    }
+
+    function ensureAirLoop() {
+      if (!airRaf && airActive && mode === "air") {
+        airRaf = requestAnimationFrame(airFrame);
+      }
+    }
+
+    function recenter() {
+      if (curBeta == null || curGamma == null) {
+        airHint.textContent = "Hold the phone still like a remote, then tap Recenter again.";
+        return;
+      }
+      baseBeta = curBeta;
+      baseGamma = curGamma;
+      smoothTiltX = 0;
+      smoothTiltY = 0;
+      calibrated = true;
+      hapArmed = true;
+      hapRim = false;
+      updateTiltDot(0, 0);
+      buzzNow([18, 35, 18]);
+      airHint.textContent = "Remote ready. Tilt left/right · tip forward/back · return upright to stop. Yaw/twist is ignored.";
+      air.classList.add("live");
+      ensureAirLoop();
+    }
+
+    async function enableSensors() {
+      if (!window.isSecureContext) {
+        httpsWarn.classList.add("show");
+        airHint.textContent = "Sensors blocked: open the https:// URL from the Mac QR.";
+        setStatus("Need HTTPS", "bad");
+        return;
+      }
+      httpsWarn.classList.remove("show");
+      try {
+        if (typeof DeviceOrientationEvent !== "undefined" &&
+            typeof DeviceOrientationEvent.requestPermission === "function") {
+          const r = await DeviceOrientationEvent.requestPermission();
+          if (r !== "granted") {
+            airHint.textContent = "Orientation permission denied.";
+            setStatus("Denied", "bad");
+            return;
+          }
+        }
+        if (typeof DeviceMotionEvent !== "undefined" &&
+            typeof DeviceMotionEvent.requestPermission === "function") {
+          try { await DeviceMotionEvent.requestPermission(); } catch (_) {}
+        }
+      } catch (err) {
+        airHint.textContent = "Could not request sensor permission.";
+        setStatus("Error", "bad");
+        return;
+      }
+
+      // Unlock vibration with this user gesture (Android Chrome)
+      buzzNow(25);
+
+      window.removeEventListener("deviceorientation", onDeviceOrientation);
+      window.addEventListener("deviceorientation", onDeviceOrientation, { passive: true });
+      sensorsOn = true;
+      airActive = true;
+      calibrated = false;
+      baseBeta = baseGamma = null;
+      smoothTiltX = smoothTiltY = 0;
+      hapArmed = true;
+      hapRim = false;
+      updateTiltDot(0, 0);
+
+      airHint.textContent = "Hold upright like a remote… centering.";
+      setTimeout(() => {
+        if (mode === "air" && sensorsOn) recenter();
+      }, 500);
+
+      if (ws && ws.readyState === WebSocket.OPEN) setStatus("Air · Live", "ok");
+      requestWakeLock();
+    }
+
+    function setMode(next) {
+      mode = next;
+      document.body.classList.toggle("mode-air", next === "air");
+      document.body.classList.toggle("mode-pad", next === "pad");
+      modePad.classList.toggle("on", next === "pad");
+      modeAir.classList.toggle("on", next === "air");
+      modePad.setAttribute("aria-pressed", next === "pad" ? "true" : "false");
+      modeAir.setAttribute("aria-pressed", next === "air" ? "true" : "false");
+      airActive = next === "air" && sensorsOn;
+      if (next !== "air" && airRaf) {
+        cancelAnimationFrame(airRaf);
+        airRaf = 0;
+      }
+      if (next !== "air") {
+        try { if (navigator.vibrate) navigator.vibrate(0); } catch (_) {}
+      }
+      if (next === "pad") {
+        tips.textContent = "1-finger glide = move · double-tap then hold & drag = select · 2-finger = scroll";
+        if (ws && ws.readyState === WebSocket.OPEN) setStatus("Live", "ok");
+        endPadDrag();
+      } else {
+        tips.textContent = "Remote: upright grip · tilt L/R or tip F/B only · Cardinal lock · Vibration on engage/rim/click";
+        if (!window.isSecureContext) httpsWarn.classList.add("show");
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          setStatus(sensorsOn ? "Air · Live" : "Air · Enable", sensorsOn ? "ok" : "");
+        }
+      }
+    }
+
+    modePad.onclick = () => setMode("pad");
+    modeAir.onclick = () => setMode("air");
+    document.getElementById("enableSensors").onclick = () => enableSensors();
+    document.getElementById("recenterBtn").onclick = () => {
+      recenter();
+    };
+    btnCardinal.onclick = () => {
+      cardinalLock = !cardinalLock;
+      btnCardinal.classList.toggle("on", cardinalLock);
+      btnCardinal.setAttribute("aria-pressed", cardinalLock ? "true" : "false");
+      buzzNow(10);
+    };
+    btnHaptic.onclick = () => {
+      hapticsOn = !hapticsOn;
+      btnHaptic.classList.toggle("on", hapticsOn);
+      btnHaptic.setAttribute("aria-pressed", hapticsOn ? "true" : "false");
+      if (hapticsOn) buzzNow(20);
+      else {
+        try { navigator.vibrate(0); } catch (_) {}
+      }
+    };
 
     function renderSens() {
       sensVal.textContent = baseGain.toFixed(1);
@@ -563,13 +986,18 @@
       if (document.visibilityState === "visible") requestWakeLock();
     });
 
+    if (!window.isSecureContext) httpsWarn.classList.add("show");
+
     function connect() {
       const url = (location.protocol === "https:" ? "wss://" : "ws://")
         + location.host + "/" + location.search;
       setStatus("Connecting");
       ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";
-      ws.onopen = () => { setStatus("Live", "ok"); requestWakeLock(); };
+      ws.onopen = () => {
+        setStatus(mode === "air" ? (sensorsOn ? "Air · Live" : "Air · Enable") : "Live", "ok");
+        requestWakeLock();
+      };
       ws.onclose = () => {
         uiLeft = false;
         uiRight = false;

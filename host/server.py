@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mac host: binary WebSocket trackpad, token auth, terminal QR."""
+"""Mac host: HTTPS + WSS trackpad/air mouse, token auth, terminal QR."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import os
 import secrets
 import signal
 import socket
+import ssl
 import struct
 import subprocess
 import sys
@@ -33,8 +34,10 @@ from mouse import MotionPump, Mouse
 PORT = int(os.environ.get("MOUSE_TO_MAC_PORT", "8765"))
 ROOT = Path(__file__).resolve().parent
 TRACKPAD_PATH = ROOT / "static" / "trackpad.html"
+CERT_DIR = ROOT / "certs"
+CERT_FILE = CERT_DIR / "cert.pem"
+KEY_FILE = CERT_DIR / "key.pem"
 
-# Protocol: float32 moves (v3). Legacy int16 still accepted.
 OP_MOVE = 1
 OP_SCROLL = 2
 OP_CLICK = 3
@@ -53,27 +56,115 @@ SCALE_LEGACY = 64.0
 TOKEN = secrets.token_urlsafe(8)
 
 
-def lan_ips() -> list[str]:
-    ips: list[str] = []
+def ensure_certs() -> None:
+    if CERT_FILE.is_file() and KEY_FILE.is_file():
+        return
+    CERT_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ip = info[4][0]
-            if not ip.startswith("127.") and ip not in ips:
-                ips.append(ip)
-    except OSError:
-        pass
-    for iface in ("en0", "en1", "en2", "bridge100"):
+        cmd = [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(KEY_FILE),
+            "-out",
+            str(CERT_FILE),
+            "-days",
+            "825",
+            "-nodes",
+            "-subj",
+            "/CN=mouse-to-mac.local",
+            "-addext",
+            "subjectAltName=DNS:localhost,IP:127.0.0.1",
+        ]
+        try:
+            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            subprocess.check_call(
+                cmd[:-2],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        raise SystemExit(
+            "Need openssl to create host/certs for HTTPS (required for Air / IMU). "
+            f"Detail: {exc}"
+        ) from exc
+    print("Created self-signed TLS cert in host/certs/", flush=True)
+
+
+def make_ssl_context() -> ssl.SSLContext:
+    ensure_certs()
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile=str(CERT_FILE), keyfile=str(KEY_FILE))
+    return ctx
+
+
+def lan_ips() -> list[str]:
+    """Prefer the phone-hotspot / Wi‑Fi address for the QR (never localhost)."""
+    found: list[str] = []
+
+    def add(ip: str) -> None:
+        if not ip or ip.startswith("127.") or ip in found:
+            return
+        if not is_private(ip):
+            return
+        found.append(ip)
+
+    for iface in ("en0", "en1", "en2", "bridge100", "ap1"):
         try:
             out = subprocess.check_output(
                 ["ipconfig", "getifaddr", iface],
                 stderr=subprocess.DEVNULL,
                 text=True,
             ).strip()
-            if out and out not in ips:
-                ips.insert(0, out)
+            add(out)
         except subprocess.CalledProcessError:
             continue
-    return ips
+
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            add(info[4][0])
+    except OSError:
+        pass
+
+    # ifconfig fallback (hotspot sometimes only shows here)
+    try:
+        text = subprocess.check_output(["ifconfig"], stderr=subprocess.DEVNULL, text=True)
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("inet "):
+                add(line.split()[1])
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Prefer classic hotspot / LAN ranges; deprioritize VPN-ish 10.5.x if others exist
+    def rank(ip: str) -> tuple[int, str]:
+        parts = [int(x) for x in ip.split(".")]
+        if parts[0] == 192 and parts[1] == 168:
+            return (0, ip)
+        if parts[0] == 10 and parts[1] != 5:
+            return (1, ip)
+        if parts[0] == 172 and 16 <= parts[1] <= 31:
+            return (2, ip)
+        if parts[0] == 10:
+            return (3, ip)
+        return (4, ip)
+
+    found.sort(key=rank)
+    return found
+
+
+def pick_url_host(ips: list[str]) -> str:
+    if ips:
+        return ips[0]
+    print(
+        "WARNING: No Wi‑Fi / hotspot IP found. Join the Mac to the phone hotspot, then restart.",
+        flush=True,
+    )
+    return "127.0.0.1"
 
 
 def token_from_path(path: str) -> str | None:
@@ -125,8 +216,9 @@ p{color:#94a3b8;line-height:1.4}
 </style></head><body><form method=GET>
 <h1>Mouse to Mac</h1>
 <p>Enter the access key from the Mac terminal, or scan the QR shown there.</p>
+<p>First visit: accept the self-signed HTTPS warning (needed for Air / IMU).</p>
 <input name=k placeholder="Access key" autocomplete=off autocapitalize=off required>
-<button type=submit>Open trackpad</button>
+<button type=submit>Open controller</button>
 </form></body></html>"""
 
 
@@ -251,24 +343,31 @@ async def handler(ws: ServerConnection, mouse: Mouse, pump: MotionPump) -> None:
 
 
 async def main() -> None:
+    ssl_ctx = make_ssl_context()
     mouse = Mouse()
     pump = MotionPump(mouse, hz=144.0)
     pump.start()
-    ips = lan_ips() or ["127.0.0.1"]
-    primary = ips[0]
-    url = f"http://{primary}:{PORT}/?k={TOKEN}"
+    ips = lan_ips()
+    primary = pick_url_host(ips)
+    url = f"https://{primary}:{PORT}/?k={TOKEN}"
 
     print("=" * 56, flush=True)
-    print("Mouse to Mac", flush=True)
+    print("Mouse to Mac (HTTPS + Pad / Air)", flush=True)
     print("=" * 56, flush=True)
     print(f"Access key: {TOKEN}", flush=True)
     print(f"URL: {url}", flush=True)
-    for ip in ips[1:]:
-        print(f"  alt: http://{ip}:{PORT}/?k={TOKEN}", flush=True)
+    if primary.startswith("127."):
+        print("*** Phone cannot open 127.0.0.1 — connect Mac to hotspot & restart ***", flush=True)
+    for ip in ips:
+        if ip != primary:
+            print(f"  alt: https://{ip}:{PORT}/?k={TOKEN}", flush=True)
+    print("=" * 56, flush=True)
+    print("First phone visit: accept the self-signed certificate warning.", flush=True)
+    print("Air mode needs HTTPS so Chrome can read the IMU.", flush=True)
     print("=" * 56, flush=True)
     print_qr(url)
-    print("Gestures: drag, tap, double-tap, long-press right,", flush=True)
-    print("  two-finger scroll, three-finger swipe = Spaces / Mission Control", flush=True)
+    print("Pad: glide, tap, double-tap+hold+drag select, 2-finger scroll", flush=True)
+    print("Air: Enable sensors → Recenter → tilt phone to move cursor", flush=True)
     print("Accessibility: System Settings > Privacy & Security > Accessibility", flush=True)
 
     stop = asyncio.get_running_loop().create_future()
@@ -292,8 +391,9 @@ async def main() -> None:
             max_size=64 * 1024,
             ping_interval=20,
             ping_timeout=20,
+            ssl=ssl_ctx,
         ):
-            print(f"listening on 0.0.0.0:{PORT}", flush=True)
+            print(f"listening on https://0.0.0.0:{PORT}", flush=True)
             await stop
     finally:
         pump.stop()
