@@ -4,7 +4,7 @@ Android phone as a Mac trackpad (and IMU air mouse) over the phone hotspot. No p
 
 ## Setup
 
-1. Join the Mac to your Android hotspot.
+1. Have Mac and  mobile connected to the same Wi-Fi, or have your Mac connected to the mobile hotspot.
 2. Grant Terminal Accessibility: System Settings → Privacy & Security → Accessibility.
 3. Start the host:
 
